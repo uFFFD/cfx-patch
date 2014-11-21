@@ -1,0 +1,280 @@
+diff --git a/python-lib/cuddlefish/__init__.py b/python-lib/cuddlefish/__init__.py
+--- a/python-lib/cuddlefish/__init__.py
++++ b/python-lib/cuddlefish/__init__.py
+@@ -143,6 +143,12 @@ parser_groups = (
+                                     default=False,
+                                     cmds=['run', 'test', 'testex', 'testpkgs',
+                                           'testaddons', 'testall'])),
++        (("", "--user-prefs",), dict(dest="user_prefs",
++                                     help="comma-separated custom set user preferences (path to a json file)",
++                                     metavar=None,
++                                     default=None,
++                                     cmds=['run', 'test', 'testex', 'testpkgs',
++                                           'testaddons', 'testall'])),
+         ]
+      ),
+ 
+@@ -909,6 +915,20 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
+         if options.addons is not None:
+             options.addons = options.addons.split(",")
+ 
++        user_prefs = {}
++        if options.user_prefs:
++            options.user_prefs = options.user_prefs.split(",")
++            for prefs in options.user_prefs:
++                prefs = os.path.expanduser(prefs)
++                prefs = os.path.abspath(prefs)
++                if (os.path.exists(prefs) and
++                    os.path.isfile(prefs)):
++                    prefs = packaging.load_json_file(prefs)
++                    user_prefs.update(prefs)
++                else:
++                    print >>sys.stderr, "File does not exist: %s" % prefs
++                    sys.exit(1)
++
+         try:
+             retval = run_app(harness_root_dir=app_extension_dir,
+                              manifest_rdf=manifest_rdf,
+@@ -931,7 +951,8 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
+                              is_running_tests=(command == "test"),
+                              overload_modules=options.overload_modules,
+                              bundle_sdk=options.bundle_sdk,
+-                             pkgdir=options.pkgdir)
++                             pkgdir=options.pkgdir,
++                             user_prefs=user_prefs)
+         except ValueError, e:
+             print ""
+             print "A given cfx option has an inappropriate value:"
+diff --git a/python-lib/cuddlefish/runner.py b/python-lib/cuddlefish/runner.py
+--- a/python-lib/cuddlefish/runner.py
++++ b/python-lib/cuddlefish/runner.py
+@@ -419,7 +419,8 @@ def run_app(harness_root_dir, manifest_rdf, harness_options,
+             is_running_tests=False,
+             overload_modules=False,
+             bundle_sdk=True,
+-            pkgdir=""):
++            pkgdir="",
++            user_prefs=None):
+     if binary:
+         binary = os.path.expanduser(binary)
+ 
+@@ -470,6 +471,9 @@ def run_app(harness_root_dir, manifest_rdf, harness_options,
+     if sys.platform == 'darwin' and app_type != 'xulrunner':
+         cmdargs.append('-foreground')
+ 
++    if user_prefs:
++        preferences.update(user_prefs)
++
+     if args:
+         cmdargs.extend(shlex.split(args))
+ 
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/main.js b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/main.js
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/main.js
+@@ -0,0 +1,17 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const { Cc, Ci } = require("chrome");
++
++exports.main = function(options, callbacks) {
++  // Close Firefox window. Firefox should quit.
++  require("sdk/deprecated/window-utils").activeBrowserWindow.close();
++
++  // But not on Mac where it stay alive! We have to request application quit.
++  if (require("sdk/system/runtime").OS == "Darwin") {
++    let appStartup = Cc['@mozilla.org/toolkit/app-startup;1'].
++                     getService(Ci.nsIAppStartup);
++    appStartup.quit(appStartup.eAttemptQuit);
++  }
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/package.json b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/package.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/package.json
+@@ -0,0 +1,6 @@
++{
++  "id": "user-prefs-test",
++  "directories": {
++    "lib": "."
++  }
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs1.json b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs1.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs1.json
+@@ -0,0 +1,6 @@
++{
++  "test.user_prefs1.boolean":    false,
++  "test.user_prefs1.int":        1024,
++  "test.user_prefs1.string":     "string",
++  "test.user_prefs.overwritten": 1
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs2.json b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs2.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs2.json
+@@ -0,0 +1,6 @@
++{
++  "test.user_prefs2.boolean":    false,
++  "test.user_prefs2.int":        1024,
++  "test.user_prefs2.string":     "string",
++  "test.user_prefs.overwritten": 2
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs3.json b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs3.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/prefs3.json
+@@ -0,0 +1,6 @@
++{
++  "test.user_prefs3.boolean":    false,
++  "test.user_prefs3.int":        1024,
++  "test.user_prefs3.string":     "string",
++  "test.user_prefs.overwritten": 3
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/tests/test-main.js b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/tests/test-main.js
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/multi-user-prefs/tests/test-main.js
+@@ -0,0 +1,23 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const prefs = require("sdk/preferences/service");
++
++exports.testPrefs = function(test) {
++  const branches = [
++    "test.user_prefs1",
++    "test.user_prefs2",
++    "test.user_prefs3",
++  ];
++  for (let b of branches) {
++    test.assert(prefs.has(b + ".boolean"));
++    test.assert(prefs.has(b + ".int"));
++    test.assert(prefs.has(b + ".string"));
++    test.assertEqual(false, prefs.get(b + ".boolean"));
++    test.assertEqual(1024, prefs.get(b + ".int"));
++    test.assertEqual("string", prefs.get(b + ".string"));
++  }
++  test.assert(prefs.has("test.user_prefs.overwritten"));
++  test.assertEqual(3, prefs.get("test.user_prefs.overwritten"));
++};
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/main.js b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/main.js
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/main.js
+@@ -0,0 +1,31 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const { Cc, Ci } = require("chrome");
++
++const prefs = require("sdk/preferences/service");
++
++const test_prefs = [
++  "test.user_prefs.boolean",
++  "test.user_prefs.int",
++  "test.user_prefs.string",
++  "test.user_prefs.non_existent",
++]
++
++test_prefs.forEach(e => {
++  if (prefs.has(e))
++    console.log(e + " : " + prefs.get(e));
++});
++
++exports.main = function(options, callbacks) {
++  // Close Firefox window. Firefox should quit.
++  require("sdk/deprecated/window-utils").activeBrowserWindow.close();
++
++  // But not on Mac where it stay alive! We have to request application quit.
++  if (require("sdk/system/runtime").OS == "Darwin") {
++    let appStartup = Cc['@mozilla.org/toolkit/app-startup;1'].
++                     getService(Ci.nsIAppStartup);
++    appStartup.quit(appStartup.eAttemptQuit);
++  }
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/package.json b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/package.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/package.json
+@@ -0,0 +1,6 @@
++{
++  "id": "user-prefs-test",
++  "directories": {
++    "lib": "."
++  }
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/prefs.json b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/prefs.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/prefs.json
+@@ -0,0 +1,5 @@
++{
++  "test.user_prefs.boolean":  false,
++  "test.user_prefs.int":      1024,
++  "test.user_prefs.string":   "string"
++}
+diff --git a/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/tests/test-main.js b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/tests/test-main.js
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-777856-files/user-prefs/tests/test-main.js
+@@ -0,0 +1,15 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++const prefs = require("sdk/preferences/service");
++
++exports.testPrefs = function(test) {
++  test.assert(prefs.has("test.user_prefs.boolean"));
++  test.assert(prefs.has("test.user_prefs.int"));
++  test.assert(prefs.has("test.user_prefs.string"));
++  test.assert(!prefs.has("test.user_prefs.non_existent"));
++  test.assertEqual(false, prefs.get("test.user_prefs.boolean"));
++  test.assertEqual(1024, prefs.get("test.user_prefs.int"));
++  test.assertEqual("string", prefs.get("test.user_prefs.string"));
++};
+diff --git a/python-lib/cuddlefish/tests/test_init.py b/python-lib/cuddlefish/tests/test_init.py
+--- a/python-lib/cuddlefish/tests/test_init.py
++++ b/python-lib/cuddlefish/tests/test_init.py
+@@ -236,6 +236,35 @@ class TestCfxQuits(unittest.TestCase):
+         self.assertIn("2 of 2 tests passed.", err)
+         self.assertIn("Program terminated successfully.", err)
+ 
++    def test_cfx_run_user_prefs(self):
++        addon_path = os.path.join(tests_path, "bug-777856-files", "user-prefs")
++        user_prefs_path = os.path.join(addon_path, "prefs.json")
++        rc, out, err = self.run_cfx(addon_path, ["run", "--user-prefs", user_prefs_path])
++        self.assertEqual(rc, 0)
++        self.assertIn("test.user_prefs.boolean", err)
++        self.assertIn("test.user_prefs.int", err)
++        self.assertIn("test.user_prefs.string", err)
++        self.assertIn("Program terminated successfully.", err)
++
++    def test_cfx_test_user_prefs(self):
++        addon_path = os.path.join(tests_path, "bug-777856-files", "user-prefs")
++        user_prefs_path = os.path.join(addon_path, "prefs.json")
++        rc, out, err = self.run_cfx(addon_path, ["test", "--user-prefs", user_prefs_path])
++        self.assertEqual(rc, 0)
++        self.assertIn("7 of 7 tests passed.", err)
++        self.assertIn("Program terminated successfully.", err)
++
++    def test_cfx_test_multi_user_prefs(self):
++        addon_path = os.path.join(tests_path, "bug-777856-files", "multi-user-prefs")
++        user_prefs_path = ",".join([os.path.join(addon_path, "prefs1.json"),
++                                    os.path.join(addon_path, "prefs2.json"),
++                                    os.path.join(addon_path, "prefs3.json"),
++                                   ])
++        rc, out, err = self.run_cfx(addon_path, ["test", "--user-prefs", user_prefs_path])
++        self.assertEqual(rc, 0)
++        self.assertIn("20 of 20 tests passed.", err)
++        self.assertIn("Program terminated successfully.", err)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

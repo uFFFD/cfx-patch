@@ -1,0 +1,21 @@
+diff --git a/python-lib/cuddlefish/xpi.py b/python-lib/cuddlefish/xpi.py
+--- a/python-lib/cuddlefish/xpi.py
++++ b/python-lib/cuddlefish/xpi.py
+@@ -32,7 +32,7 @@ def build_xpi(template_root_dir, manifest, xpi_path,
+ 
+     zf = zipfile.ZipFile(xpi_path, "w", zipfile.ZIP_DEFLATED)
+ 
+-    open('.install.rdf', 'w').write(str(manifest))
++    open('.install.rdf', 'wb').write(str(manifest))
+     zf.write('.install.rdf', 'install.rdf')
+     os.remove('.install.rdf')
+ 
+@@ -183,7 +183,7 @@ def build_xpi(template_root_dir, manifest, xpi_path,
+         harness_options[key] = value
+ 
+     # Write harness-options.json
+-    open('.options.json', 'w').write(json.dumps(harness_options, indent=1,
++    open('.options.json', 'wb').write(json.dumps(harness_options, indent=1,
+                                                 sort_keys=True))
+     zf.write('.options.json', 'harness-options.json')
+     os.remove('.options.json')

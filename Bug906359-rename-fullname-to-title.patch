@@ -1,0 +1,108 @@
+diff --git a/python-lib/cuddlefish/__init__.py b/python-lib/cuddlefish/__init__.py
+--- a/python-lib/cuddlefish/__init__.py
++++ b/python-lib/cuddlefish/__init__.py
+@@ -544,7 +544,7 @@ def initializer(env_root, args, out=sys.stdout, err=sys.stderr):
+     jid = create_jid()
+     print >>out, '* generated jID automatically:', jid
+     open(os.path.join(path,'package.json'),'w').write(PACKAGE_JSON % {'name':addon.lower(),
+-                                                   'fullName':addon,
++                                                   'title':addon,
+                                                    'id':jid })
+     print >>out, '* package.json written'
+     open(os.path.join(path,'test','test-main.js'),'w').write(TEST_MAIN_JS)
+diff --git a/python-lib/cuddlefish/rdf.py b/python-lib/cuddlefish/rdf.py
+--- a/python-lib/cuddlefish/rdf.py
++++ b/python-lib/cuddlefish/rdf.py
+@@ -122,7 +122,7 @@ def gen_manifest(template_root_dir, target_cfg, jid,
+     manifest.set("em:version",
+                  target_cfg.get('version', '1.0'))
+     manifest.set("em:name",
+-                 target_cfg.get('fullName', target_cfg['name']))
++                 target_cfg.get('title', target_cfg.get('fullName', target_cfg['name'])))
+     manifest.set("em:description",
+                  target_cfg.get("description", ""))
+     manifest.set("em:creator",
+diff --git a/python-lib/cuddlefish/templates.py b/python-lib/cuddlefish/templates.py
+--- a/python-lib/cuddlefish/templates.py
++++ b/python-lib/cuddlefish/templates.py
+@@ -22,7 +22,7 @@ require("sdk/test").run(exports);
+ PACKAGE_JSON = '''\
+ {
+   "name": "%(name)s",
+-  "fullName": "%(fullName)s",
++  "title": "%(title)s",
+   "id": "%(id)s",
+   "description": "a basic add-on",
+   "author": "",
+diff --git a/python-lib/cuddlefish/tests/bug-906359-files/fullName/package.json b/python-lib/cuddlefish/tests/bug-906359-files/fullName/package.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-906359-files/fullName/package.json
+@@ -0,0 +1,9 @@
++{
++    "name": "empty",
++    "license": "MPL 2.0",
++    "author": "",
++    "version": "0.1",
++    "fullName": "a long fullName",
++    "id": "jid1-80123",
++    "description": "test addon name fallback to 'fullName' key"
++}
+diff --git a/python-lib/cuddlefish/tests/bug-906359-files/none/package.json b/python-lib/cuddlefish/tests/bug-906359-files/none/package.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-906359-files/none/package.json
+@@ -0,0 +1,9 @@
++{
++    "name": "a long none",
++    "license": "MPL 2.0",
++    "author": "",
++    "version": "0.1",
++
++    "id": "jid1-80123",
++    "description": "test addon name falls back all the way to the 'name' key"
++}
+diff --git a/python-lib/cuddlefish/tests/bug-906359-files/title/package.json b/python-lib/cuddlefish/tests/bug-906359-files/title/package.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-906359-files/title/package.json
+@@ -0,0 +1,9 @@
++{
++    "name": "empty",
++    "license": "MPL 2.0",
++    "author": "",
++    "version": "0.1",
++    "title": "a long title",
++    "id": "jid1-80123",
++    "description": "test addon name comes from the 'title' key"
++}
+diff --git a/python-lib/cuddlefish/tests/test_init.py b/python-lib/cuddlefish/tests/test_init.py
+--- a/python-lib/cuddlefish/tests/test_init.py
++++ b/python-lib/cuddlefish/tests/test_init.py
+@@ -48,7 +48,7 @@ class TestInit(unittest.TestCase):
+         self.assertEqual(open(main_js,"r").read(),"")
+         self.assertEqual(open(package_json,"r").read() % {"id":"tmp_addon_id" },
+                          PACKAGE_JSON % {"name":"tmp_addon_sample",
+-                                         "fullName": "tmp_addon_SAMPLE",
++                                         "title": "tmp_addon_SAMPLE",
+                                          "id":init_run["jid"] })
+         self.assertEqual(open(test_main_js,"r").read(),TEST_MAIN_JS)
+ 
+diff --git a/python-lib/cuddlefish/tests/test_rdf.py b/python-lib/cuddlefish/tests/test_rdf.py
+--- a/python-lib/cuddlefish/tests/test_rdf.py
++++ b/python-lib/cuddlefish/tests/test_rdf.py
+@@ -41,5 +41,14 @@ class RDFTests(unittest.TestCase):
+                 self.failUnlessEqual(m.get("em:unpack"), "true")
+                 self.failUnlessIn("<em:unpack>true</em:unpack>", str(m), n)
+ 
++    def testTitle(self):
++        basedir = os.path.join(test_dir, 'bug-906359-files')
++        for n in ['title', 'fullName', 'none']:
++            cfg = packaging.get_config_in_dir(os.path.join(basedir, n))
++            m = rdf.gen_manifest(template_dir, cfg, jid='JID')
++            self.failUnlessEqual(m.get('em:name'), 'a long ' + n)
++            self.failUnlessIn('<em:name>a long ' + n + '</em:name>', str(m), n)
++
++
+ if __name__ == '__main__':
+     unittest.main()

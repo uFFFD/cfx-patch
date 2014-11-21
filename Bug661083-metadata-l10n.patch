@@ -1,0 +1,253 @@
+diff --git a/python-lib/cuddlefish/__init__.py b/python-lib/cuddlefish/__init__.py
+--- a/python-lib/cuddlefish/__init__.py
++++ b/python-lib/cuddlefish/__init__.py
+@@ -854,7 +854,8 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
+                                 jid=jid,
+                                 update_url=options.update_url,
+                                 bootstrap=True,
+-                                enable_mobile=options.enable_mobile)
++                                enable_mobile=options.enable_mobile,
++                                harness_options=harness_options)
+ 
+     if command == "xpi" and options.update_link:
+         if not options.update_link.startswith("https"):
+diff --git a/python-lib/cuddlefish/prefs.py b/python-lib/cuddlefish/prefs.py
+--- a/python-lib/cuddlefish/prefs.py
++++ b/python-lib/cuddlefish/prefs.py
+@@ -117,3 +117,8 @@ DEFAULT_THUNDERBIRD_PREFS = {
+     'mail.startup.enabledMailCheckOnce' :  True,
+     'mailnews.start_page_override.mstone' :  "ignore",
+     }
++
++DEFAULT_TEST_PREFS = {
++    'general.useragent.locale': "en-US",
++    'intl.locale.matchOS': "en-US"
++}
+diff --git a/python-lib/cuddlefish/rdf.py b/python-lib/cuddlefish/rdf.py
+--- a/python-lib/cuddlefish/rdf.py
++++ b/python-lib/cuddlefish/rdf.py
+@@ -112,7 +112,12 @@ class RDFManifest(RDF):
+ 
+         return True;
+ 
+-def gen_manifest(template_root_dir, target_cfg, jid,
++    def add_node(self, node):
++        top = self.dom.documentElement.getElementsByTagName("Description")[0];
++        top.appendChild(node)
++
++
++def gen_manifest(template_root_dir, target_cfg, jid, harness_options={},
+                  update_url=None, bootstrap=True, enable_mobile=False):
+     install_rdf = os.path.join(template_root_dir, "install.rdf")
+     manifest = RDFManifest(install_rdf)
+@@ -121,6 +126,37 @@ def gen_manifest(template_root_dir, target_cfg, jid,
+     manifest.set("em:id", jid)
+     manifest.set("em:version",
+                  target_cfg.get('version', '1.0'))
++
++    if "locale" in harness_options:
++        # addon_title       -> <em:name>
++        # addon_author      -> <em:creator>
++        # addon_description -> <em:description>
++        # addon_homepageURL -> <em:homepageURL>
++        localizable_in = ["title", "author", "description", "homepage"]
++        localized_out  = ["name", "creator", "description", "homepageURL"]
++        for lang in harness_options["locale"]:
++            desc = dom.createElement("Description")
++
++            for value_in in localizable_in:
++                key_in = "extensions." + target_cfg.get("id", "") + "." + value_in
++                tag_out = localized_out[localizable_in.index(value_in)]
++
++                if key_in in harness_options["locale"][lang]:
++                    elem = dom.createElement("em:" + tag_out)
++                    elem_value = harness_options["locale"][lang][key_in]
++                    elem.appendChild(dom.createTextNode(elem_value))
++                    desc.appendChild(elem)
++
++            # Don't add language if no localizeable field was localized
++            if desc.hasChildNodes():
++                locale = dom.createElement("em:locale")
++                locale.appendChild(dom.createTextNode(lang))
++                desc.appendChild(locale)
++
++                localized = dom.createElement("em:localized")
++                localized.appendChild(desc)
++                manifest.add_node(localized)
++
+     manifest.set("em:name",
+                  target_cfg.get('title', target_cfg.get('fullName', target_cfg['name'])))
+     manifest.set("em:description",
+@@ -136,12 +172,12 @@ def gen_manifest(template_root_dir, target_cfg, jid,
+     for translator in target_cfg.get("translators", [ ]):
+         elem = dom.createElement("em:translator");
+         elem.appendChild(dom.createTextNode(translator))
+-        dom.documentElement.getElementsByTagName("Description")[0].appendChild(elem)
++        manifest.add_node(elem)
+ 
+     for contributor in target_cfg.get("contributors", [ ]):
+         elem = dom.createElement("em:contributor");
+         elem.appendChild(dom.createTextNode(contributor))
+-        dom.documentElement.getElementsByTagName("Description")[0].appendChild(elem)
++        manifest.add_node(elem)
+ 
+     if update_url:
+         manifest.set("em:updateURL", update_url)
+@@ -155,7 +191,7 @@ def gen_manifest(template_root_dir, target_cfg, jid,
+ 
+     if enable_mobile:
+         target_app = dom.createElement("em:targetApplication")
+-        dom.documentElement.getElementsByTagName("Description")[0].appendChild(target_app)
++        manifest.add_node(target_app)
+ 
+         ta_desc = dom.createElement("Description")
+         target_app.appendChild(ta_desc)
+diff --git a/python-lib/cuddlefish/runner.py b/python-lib/cuddlefish/runner.py
+--- a/python-lib/cuddlefish/runner.py
++++ b/python-lib/cuddlefish/runner.py
+@@ -17,6 +17,7 @@ from cuddlefish.prefs import DEFAULT_COMMON_PREFS
+ from cuddlefish.prefs import DEFAULT_FIREFOX_PREFS
+ from cuddlefish.prefs import DEFAULT_THUNDERBIRD_PREFS
+ from cuddlefish.prefs import DEFAULT_FENNEC_PREFS
++from cuddlefish.prefs import DEFAULT_TEST_PREFS
+ 
+ # Used to remove noise from ADB output
+ CLEANUP_ADB = re.compile(r'^(I|E)/(stdout|stderr|GeckoConsole)\s*\(\s*\d+\):\s*(.*)$')
+@@ -430,6 +431,9 @@ def run_app(harness_root_dir, manifest_rdf, harness_options,
+     cmdargs = []
+     preferences = dict(DEFAULT_COMMON_PREFS)
+ 
++    if is_running_tests:
++        preferences.update(DEFAULT_TEST_PREFS)
++
+     # For now, only allow running on Mobile with --force-mobile argument
+     if app_type in ["fennec", "fennec-on-device"] and not enable_mobile:
+         print """
+diff --git a/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/locale/en-GB.properties b/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/locale/en-GB.properties
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/locale/en-GB.properties
+@@ -0,0 +1 @@
++some_key = some_value
+diff --git a/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/locale/en-US.properties b/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/locale/en-US.properties
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/locale/en-US.properties
+@@ -0,0 +1 @@
++some_key = some_value
+diff --git a/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/package.json b/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/package.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-661083-files/packages/noLocalization/package.json
+@@ -0,0 +1,11 @@
++{
++    "name": "nolocalization",
++    "id": "jid1-TBF7sWF7yT6xSQ",
++    "license": "MPL 2.0",
++    "version": "0.1",
++
++    "title": "tilteUnlocalized",
++    "author": "authorUnlocalized",
++    "description": "descriptionUnlocalized",
++    "homepage": "homepageUnlocalized"
++}
+diff --git a/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/locale/en-GB.properties b/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/locale/en-GB.properties
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/locale/en-GB.properties
+@@ -0,0 +1,4 @@
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.title = title-en-GB
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.author = author-en-GB
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.description = description-en-GB
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.homepage = homepage-en-GB
+diff --git a/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/locale/en-US.properties b/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/locale/en-US.properties
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/locale/en-US.properties
+@@ -0,0 +1,4 @@
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.title = title-en-US
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.author = author-en-US
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.description = description-en-US
++extensions.jid1-TBF7sWF7yT6xSQ@jetpack.homepage = homepage-en-US
+diff --git a/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/package.json b/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/package.json
+new file mode 100644
+--- /dev/null
++++ b/python-lib/cuddlefish/tests/bug-661083-files/packages/twoLanguages/package.json
+@@ -0,0 +1,11 @@
++{
++    "name": "nolocalization",
++    "id": "jid1-TBF7sWF7yT6xSQ@jetpack",
++    "license": "MPL 2.0",
++    "version": "0.1",
++
++    "title": "tilteUnlocalized",
++    "author": "authorUnlocalized",
++    "description": "descriptionUnlocalized",
++    "homepage": "homepageUnlocalized"
++}
+diff --git a/python-lib/cuddlefish/tests/test_rdf.py b/python-lib/cuddlefish/tests/test_rdf.py
+--- a/python-lib/cuddlefish/tests/test_rdf.py
++++ b/python-lib/cuddlefish/tests/test_rdf.py
+@@ -6,7 +6,7 @@ import unittest
+ import xml.dom.minidom
+ import os.path
+ 
+-from cuddlefish import rdf, packaging
++from cuddlefish import rdf, packaging, property_parser
+ 
+ parent = os.path.dirname
+ test_dir = parent(os.path.abspath(__file__))
+@@ -49,6 +49,53 @@ class RDFTests(unittest.TestCase):
+             self.failUnlessEqual(m.get('em:name'), 'a long ' + n)
+             self.failUnlessIn('<em:name>a long ' + n + '</em:name>', str(m), n)
+ 
++    def testLocalization(self):
++        # addon_title       -> <em:name>
++        # addon_author      -> <em:creator>
++        # addon_description -> <em:description>
++        # addon_homepageURL -> <em:homepageURL>
++        localizable_in = ["title", "author", "description", "homepage"]
++        localized_out  = ["name", "creator", "description", "homepageURL"]
++
++        basedir = os.path.join(test_dir, "bug-661083-files/packages")
++        for n in ["noLocalization", "twoLanguages"]:
++            harness_options = { "locale" : {} }
++            pkgdir = os.path.join(basedir, n)
++            localedir = os.path.join(pkgdir, "locale")
++            files = os.listdir(localedir)
++
++            for file in files:
++                filepath = os.path.join(localedir, file)
++                if os.path.isfile(filepath) and file.endswith(".properties"):
++                    language = file[:-len(".properties")]
++                    try:
++                        parsed_file = property_parser.parse_file(filepath)
++                    except property_parser.MalformedLocaleFileError, msg:
++                        self.fail(msg)
++
++                    harness_options["locale"][language] = parsed_file
++
++            cfg = packaging.get_config_in_dir(pkgdir)
++            m = rdf.gen_manifest(template_dir, cfg, 'JID', harness_options)
++
++            if n == "noLocalization":
++                self.failIf("<em:locale>" in str(m))
++                continue
++
++            for lang in harness_options["locale"]:
++                rdfstr = str(m)
++                node = "<em:locale>" + lang + "</em:locale>"
++                self.failUnlessIn(node, rdfstr, n)
++
++                for value_in in localizable_in:
++                    key_in = "extensions." + m.get('em:id') + "." + value_in
++                    tag_out = localized_out[localizable_in.index(value_in)]
++                    if key_in in harness_options["locale"][lang]:
++                        # E.g. "<em:creator>author-en-US</em:creator>"
++                        node = "<em:" + tag_out + ">" + value_in + "-" + lang \
++                            + "</em:" + tag_out + ">"
++                        self.failUnlessIn(node , rdfstr, n)
++
+ 
+ if __name__ == '__main__':
+     unittest.main()
